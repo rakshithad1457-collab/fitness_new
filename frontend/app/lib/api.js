@@ -1,6 +1,8 @@
 import axios from 'axios';
 
-const API_URL = 'http://127.0.0.1:8000';
+const API_URL = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
+  ? 'https://fitmood-backend.onrender.com'
+  : 'http://127.0.0.1:8000';
 
 const api = axios.create({
   baseURL: API_URL,
@@ -20,6 +22,14 @@ api.interceptors.request.use((config) => {
 
 // --- AUTHENTICATION MODULE ---
 export const authAPI = {
+  register: async (name, dob, email, password) => {
+    const response = await api.post('/api/auth/register', { name, dob, email, password });
+    if (response.data.access_token) {
+      localStorage.setItem('token', response.data.access_token);
+      localStorage.setItem('user', JSON.stringify(response.data.user));
+    }
+    return response.data;
+  },
   login: async (email, password) => {
     const response = await api.post('/api/auth/login', { email, password });
     if (response.data.access_token) {
@@ -45,13 +55,10 @@ export const authAPI = {
 
 // --- WORKOUTS MODULE ---
 export const workoutAPI = {
-  // POST /api/workouts/mood-based
-  // expects: { mood: "happy", available_time: 30 }
   getWorkoutsByMood: async (moodData) => {
     const response = await api.post('/api/workouts/mood-based', moodData);
     return response.data;
   },
-  // GET /api/workouts/
   getAllWorkouts: async () => {
     const response = await api.get('/api/workouts/');
     return response.data;
@@ -59,11 +66,7 @@ export const workoutAPI = {
 };
 
 // --- NUTRITION MODULE ---
-// All three methods accept a SINGLE object argument
-// so page.js can call: nutritionAPI.getRecipes({ goal, restrictions })
-
 export const nutritionAPI = {
-  // GET /api/nutrition/recipes?goal=weight_loss&restrictions=Vegan,Keto
   getRecipes: async ({ goal, restrictions = '' }) => {
     const response = await api.get('/api/nutrition/recipes', {
       params: {
@@ -76,7 +79,6 @@ export const nutritionAPI = {
     return response.data;
   },
 
-  // GET /api/nutrition/meal-plan?goal=weight_loss&restrictions=&days=7
   getMealPlan: async ({ goal, restrictions = '', days = 7 }) => {
     const response = await api.get('/api/nutrition/meal-plan', {
       params: {
@@ -90,7 +92,6 @@ export const nutritionAPI = {
     return response.data;
   },
 
-  // GET /api/nutrition/healthy-swaps?craving=sweet
   getHealthySwaps: async ({ craving }) => {
     const response = await api.get('/api/nutrition/healthy-swaps', {
       params: { craving },
