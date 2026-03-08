@@ -11,11 +11,7 @@ app = FastAPI(title="FitMood API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "https://fitness-new-git-main-rakshithad1457-2434s-projects.vercel.app",
-        "https://fitness-new.vercel.app",
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
