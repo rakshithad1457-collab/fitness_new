@@ -6,9 +6,7 @@ import { motion } from 'framer-motion';
 import { Mail, Lock, ArrowRight, ShieldCheck, Zap, User, Calendar } from 'lucide-react';
 import axios from 'axios';
 
-const API = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
-  ? 'https://fitmood-backend.onrender.com/api'
-  : 'http://localhost:8000/api';
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
 
 export default function LoginPage() {
   const router = useRouter();
