@@ -6,7 +6,9 @@ import { motion } from 'framer-motion';
 import { Mail, Lock, ArrowRight, ShieldCheck, Zap, User, Calendar } from 'lucide-react';
 import axios from 'axios';
 
-const API = 'http://localhost:8000/api';
+const API = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
+  ? 'https://fitmood-backend.onrender.com/api'
+  : 'http://localhost:8000/api';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -124,7 +126,6 @@ export default function LoginPage() {
 
         <div className="space-y-5">
 
-          {/* Full Name - register only */}
           {mode === 'register' && (
             <div className="space-y-2">
               <label className="text-[10px] font-bold uppercase tracking-widest text-[#6B7280] ml-1">Full Name</label>
@@ -142,7 +143,6 @@ export default function LoginPage() {
             </div>
           )}
 
-          {/* Date of Birth - register only */}
           {mode === 'register' && (
             <div className="space-y-2">
               <label className="text-[10px] font-bold uppercase tracking-widest text-[#6B7280] ml-1">Date of Birth</label>
@@ -159,7 +159,6 @@ export default function LoginPage() {
             </div>
           )}
 
-          {/* Email */}
           <div className="space-y-2">
             <label className="text-[10px] font-bold uppercase tracking-widest text-[#6B7280] ml-1">Email Address</label>
             <div className="relative">
@@ -175,7 +174,6 @@ export default function LoginPage() {
             </div>
           </div>
 
-          {/* Password - login & register only */}
           {(mode === 'login' || mode === 'register') && (
             <div className="space-y-2">
               <label className="text-[10px] font-bold uppercase tracking-widest text-[#6B7280] ml-1">Password</label>
@@ -202,7 +200,6 @@ export default function LoginPage() {
             </div>
           )}
 
-          {/* OTP + New Password - otp mode only */}
           {mode === 'otp' && (
             <>
               <div className="space-y-2">
@@ -233,7 +230,6 @@ export default function LoginPage() {
             </>
           )}
 
-          {/* Error */}
           {error && (
             <motion.div
               initial={{ opacity: 0 }}
@@ -244,7 +240,6 @@ export default function LoginPage() {
             </motion.div>
           )}
 
-          {/* Success */}
           {success && (
             <motion.div
               initial={{ opacity: 0 }}
@@ -255,7 +250,6 @@ export default function LoginPage() {
             </motion.div>
           )}
 
-          {/* Submit Button */}
           <motion.button
             whileHover={{ scale: 1.01 }}
             whileTap={{ scale: 0.99 }}
