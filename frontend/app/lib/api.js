@@ -9,7 +9,6 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
-// Interceptor to automatically attach JWT tokens to requests
 api.interceptors.request.use((config) => {
   if (typeof window !== 'undefined') {
     const token = localStorage.getItem('token');
@@ -20,7 +19,6 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// --- AUTHENTICATION MODULE ---
 export const authAPI = {
   register: async (name, dob, email, password) => {
     const response = await api.post('/api/auth/register', { name, dob, email, password });
@@ -53,7 +51,6 @@ export const authAPI = {
   },
 };
 
-// --- WORKOUTS MODULE ---
 export const workoutAPI = {
   getWorkoutsByMood: async (moodData) => {
     const response = await api.post('/api/workouts/mood-based', moodData);
@@ -65,33 +62,26 @@ export const workoutAPI = {
   },
 };
 
-// --- NUTRITION MODULE ---
 export const nutritionAPI = {
   getRecipes: async ({ goal, restrictions = '' }) => {
     const response = await api.get('/api/nutrition/recipes', {
       params: {
         goal,
-        restrictions: Array.isArray(restrictions)
-          ? restrictions.join(',')
-          : restrictions,
+        restrictions: Array.isArray(restrictions) ? restrictions.join(',') : restrictions,
       },
     });
     return response.data;
   },
-
   getMealPlan: async ({ goal, restrictions = '', days = 7 }) => {
     const response = await api.get('/api/nutrition/meal-plan', {
       params: {
         goal,
-        restrictions: Array.isArray(restrictions)
-          ? restrictions.join(',')
-          : restrictions,
+        restrictions: Array.isArray(restrictions) ? restrictions.join(',') : restrictions,
         days,
       },
     });
     return response.data;
   },
-
   getHealthySwaps: async ({ craving }) => {
     const response = await api.get('/api/nutrition/healthy-swaps', {
       params: { craving },
