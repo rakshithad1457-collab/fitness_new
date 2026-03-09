@@ -10,8 +10,8 @@ from app.models.user import UserCreate, RegisterUser, Token, UserResponse, Forgo
 router = APIRouter()
 OTP_STORE = {}
 
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://oqasfsiffdokqlevtuph.supabase.co")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "sb_secret_5iybOAtj4Asj3C4r1qWDpw_8hiefFja")
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
