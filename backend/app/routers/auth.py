@@ -119,6 +119,15 @@ async def reset_password(req: VerifyOTP):
     del OTP_STORE[req.email]
     return {"message": "Password reset successful"}
 
+@router.post("/update-mood")
+async def update_mood(payload: dict):
+    email = payload.get("email")
+    mood = payload.get("mood")
+    if not email or not mood:
+        raise HTTPException(status_code=400, detail="Email and mood required")
+    supabase.table("users").update({"last_mood": mood}).eq("email", email).execute()
+    return {"message": "Mood updated"}
+
 @router.get("/admin/users")
 async def get_all_users():
     res = supabase.table("users").select("*").order("id").execute()
