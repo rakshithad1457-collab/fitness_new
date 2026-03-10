@@ -7,7 +7,7 @@ python-multipart
 supabase
 emails
 jinja2
-pydantic[email]
+pydantic
 pydantic-settings
 python-dateutil
 requests
@@ -15,4 +15,3 @@ nltk
 scikit-learn
 pandas
 numpy
-email-validator
