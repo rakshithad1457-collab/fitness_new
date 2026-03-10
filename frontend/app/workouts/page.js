@@ -25,8 +25,6 @@ const AGE_BADGE_COLORS = {
   senior:      { bg: '#F5F3FF', text: '#4C1D95', border: '#A78BFA' },
 };
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
-
 function WorkoutsContent() {
   const router       = useRouter();
   const searchParams = useSearchParams();
@@ -56,16 +54,6 @@ function WorkoutsContent() {
         age_category:   ageCategory,
       });
       setWorkout(response);
-
-      // Save mood to database
-      const currentUser = authAPI.getCurrentUser();
-      if (currentUser) {
-        await fetch(`${API}/auth/update-mood`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: currentUser.email, mood: selectedMood }),
-        });
-      }
     } catch (err) {
       setError('Failed to generate workout. Please try again.');
     } finally {
