@@ -62,7 +62,7 @@ async def register(user: RegisterUser):
         "name": user.name,
         "dob": user.dob,
         "email": user.email,
-        "hashed_password": pwd_context.hash(user.password),
+        "hashed_password": pwd_context.hash(user.password[:72]),
         "workouts": 0,
         "last_mood": "neutral",
         "joined": now,
@@ -114,7 +114,7 @@ async def reset_password(req: VerifyOTP):
     if stored["otp"] != req.otp:
         raise HTTPException(status_code=400, detail="Invalid OTP")
     supabase.table("users").update({
-        "hashed_password": pwd_context.hash(req.new_password)
+        "hashed_password": pwd_context.hash(req.new_password[:72]),
     }).eq("email", req.email).execute()
     del OTP_STORE[req.email]
     return {"message": "Password reset successful"}
@@ -191,7 +191,7 @@ async def create_user(user: RegisterUser):
         "name": user.name,
         "dob": user.dob,
         "email": user.email,
-        "hashed_password": pwd_context.hash(user.password),
+        "hashed_password": pwd_context.hash(user.password[:72]),
         "workouts": 0,
         "last_mood": "neutral",
         "joined": now,
