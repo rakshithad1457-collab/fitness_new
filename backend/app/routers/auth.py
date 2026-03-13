@@ -1,16 +1,14 @@
 """
 app/routers/auth.py
 -------------------
-Authentication router — MongoDB + improved OTP email sending.
+Authentication router — MongoDB + Brevo HTTP API for OTP email.
 """
 
 from fastapi import APIRouter, HTTPException, status
 from passlib.context import CryptContext
 from jose import jwt
 from datetime import datetime, timedelta
-import os, random, smtplib, json
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import os, random, json, requests
 from app.models.user import UserCreate, RegisterUser, Token, UserResponse, ForgotRequest, VerifyOTP
 from app.database import users_collection
 
@@ -23,36 +21,31 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 EMAIL_SENDER = os.environ.get("EMAIL_SENDER", "")
-EMAIL_PASSWORD = os.environ.get("EMAIL_PASSWORD", "")
+BREVO_API_KEY = os.environ.get("BREVO_API_KEY", "")
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 def send_otp_email(to_email: str, otp: str) -> bool:
     try:
-        print(f"[EMAIL] Attempting to send OTP to {to_email}")
-        print(f"[EMAIL] Using sender: {EMAIL_SENDER}")
-        print(f"[EMAIL] Password set: {'YES' if EMAIL_PASSWORD else 'NO'}")
+        print(f"[EMAIL] Sending OTP to {to_email} via Brevo")
 
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = "FitMood — Your Password Reset OTP"
-        msg["From"] = f"FitMood <{EMAIL_SENDER}>"
-        msg["To"] = to_email
+        url = "https://api.brevo.com/v3/smtp/email"
 
-        # Plain text version
-        text_body = f"""
-Hi there!
+        headers = {
+            "accept": "application/json",
+            "api-key": BREVO_API_KEY,
+            "content-type": "application/json"
+        }
 
-Your FitMood OTP code is: {otp}
-
-This code is valid for 10 minutes.
-Do not share this code with anyone.
-
-— FitMood Team
-"""
-
-        # HTML version (nicer looking email)
-        html_body = f"""
+        payload = {
+            "sender": {
+                "name": "FitMood",
+                "email": EMAIL_SENDER
+            },
+            "to": [{"email": to_email}],
+            "subject": "FitMood — Your Password Reset OTP",
+            "htmlContent": f"""
 <html>
 <body style="font-family: Arial, sans-serif; background: #f4f4f4; padding: 30px;">
   <div style="max-width: 400px; margin: auto; background: white; border-radius: 12px; padding: 30px; text-align: center;">
@@ -65,24 +58,19 @@ Do not share this code with anyone.
   </div>
 </body>
 </html>
-"""
+""",
+            "textContent": f"Your FitMood OTP is: {otp}\n\nValid for 10 minutes. Do not share this code."
+        }
 
-        msg.attach(MIMEText(text_body, "plain"))
-        msg.attach(MIMEText(html_body, "html"))
+        response = requests.post(url, json=payload, headers=headers, timeout=10)
 
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=10) as server:
-            server.login(EMAIL_SENDER, EMAIL_PASSWORD)
-            server.send_message(msg)
+        if response.status_code in (200, 201):
+            print(f"[EMAIL] OTP sent successfully to {to_email}")
+            return True
+        else:
+            print(f"[EMAIL ERROR] Brevo API error: {response.status_code} — {response.text}")
+            return False
 
-        print(f"[EMAIL] OTP sent successfully to {to_email}")
-        return True
-
-    except smtplib.SMTPAuthenticationError:
-        print(f"[EMAIL ERROR] Authentication failed — check EMAIL_SENDER and EMAIL_PASSWORD env vars")
-        return False
-    except smtplib.SMTPException as e:
-        print(f"[EMAIL ERROR] SMTP error: {e}")
-        return False
     except Exception as e:
         print(f"[EMAIL ERROR] Unexpected error: {e}")
         return False
@@ -298,15 +286,20 @@ async def send_email_to_user(payload: dict):
     body = payload.get("body", "")
     if not to_email or not body:
         raise HTTPException(status_code=400, detail="Email and body are required")
-    try:
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = subject
-        msg["From"] = f"FitMood <{EMAIL_SENDER}>"
-        msg["To"] = to_email
-        msg.attach(MIMEText(body, "plain"))
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=10) as server:
-            server.login(EMAIL_SENDER, EMAIL_PASSWORD)
-            server.send_message(msg)
+
+    url = "https://api.brevo.com/v3/smtp/email"
+    headers = {
+        "accept": "application/json",
+        "api-key": BREVO_API_KEY,
+        "content-type": "application/json"
+    }
+    payload_data = {
+        "sender": {"name": "FitMood", "email": EMAIL_SENDER},
+        "to": [{"email": to_email}],
+        "subject": subject,
+        "textContent": body
+    }
+    response = requests.post(url, json=payload_data, headers=headers, timeout=10)
+    if response.status_code in (200, 201):
         return {"message": "Email sent successfully"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to send email: {str(e)}")
+    raise HTTPException(status_code=500, detail=f"Failed to send email: {response.text}")
