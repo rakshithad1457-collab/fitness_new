@@ -1,26 +1,31 @@
+"""
+app/routers/auth.py
+-------------------
+Authentication router — fully migrated from Supabase to MongoDB.
+"""
+
 from fastapi import APIRouter, HTTPException, status
 from passlib.context import CryptContext
 from jose import jwt
 from datetime import datetime, timedelta
 import os, random, smtplib, json
 from email.mime.text import MIMEText
-from supabase import create_client
 from app.models.user import UserCreate, RegisterUser, Token, UserResponse, ForgotRequest, VerifyOTP
+from app.database import users_collection
 
 router = APIRouter()
 OTP_STORE = {}
-
-SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 SECRET_KEY = "fitmood-secret-key-2026"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
-EMAIL_SENDER = "rakshithad1457@gmail.com"
-EMAIL_PASSWORD = "qvnz jwhz cldt dxyg"
+EMAIL_SENDER = os.environ.get("EMAIL_SENDER", "rakshithad1457@gmail.com")
+EMAIL_PASSWORD = os.environ.get("EMAIL_PASSWORD", "")
+
+
+# ─── Helpers ─────────────────────────────────────────────────────────────────
 
 def send_otp_email(to_email, otp):
     try:
@@ -36,6 +41,7 @@ def send_otp_email(to_email, otp):
         print(f"Email error: {e}")
         return False
 
+
 def calc_age(dob_str):
     try:
         dob = datetime.strptime(dob_str, "%Y-%m-%d")
@@ -44,18 +50,25 @@ def calc_age(dob_str):
     except:
         return None
 
-def get_user(email):
-    res = supabase.table("users").select("*").eq("email", email).execute()
-    return res.data[0] if res.data else None
+
+def get_user(email: str):
+    """Fetch a user document by email. Returns dict or None."""
+    return users_collection.find_one({"email": email}, {"_id": 0})
+
 
 def get_next_id():
-    res = supabase.table("users").select("id").order("id", desc=True).limit(1).execute()
-    return (res.data[0]["id"] + 1) if res.data else 1
+    """Auto-increment integer ID (mirrors old Supabase behaviour)."""
+    last = users_collection.find_one(sort=[("id", -1)], projection={"_id": 0, "id": 1})
+    return (last["id"] + 1) if last else 1
+
+
+# ─── Auth Routes ─────────────────────────────────────────────────────────────
 
 @router.post("/register", response_model=Token)
 async def register(user: RegisterUser):
     if get_user(user.email):
         raise HTTPException(status_code=400, detail="Email already registered")
+
     now = datetime.utcnow().strftime("%Y-%m-%d")
     new_user = {
         "id": get_next_id(),
@@ -70,28 +83,37 @@ async def register(user: RegisterUser):
         "last_login": now,
         "activity_log": [{"action": "Registered", "time": datetime.utcnow().isoformat()}],
     }
-    supabase.table("users").insert(new_user).execute()
+    users_collection.insert_one({**new_user})   # _id added by Mongo, not returned to client
+
     expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     token = jwt.encode({"sub": user.email, "exp": expire}, SECRET_KEY, algorithm=ALGORITHM)
     return {"access_token": token, "token_type": "bearer", "user": {"id": new_user["id"], "email": new_user["email"]}}
+
 
 @router.post("/login", response_model=Token)
 async def login(user: UserCreate):
     stored_user = get_user(user.email)
     if not stored_user or not pwd_context.verify(user.password, stored_user["hashed_password"]):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect email or password")
+
     now = datetime.utcnow()
     log = stored_user.get("activity_log") or []
     if isinstance(log, str):
         log = json.loads(log)
     log.append({"action": "Logged in", "time": now.isoformat()})
-    supabase.table("users").update({
-        "last_login": now.strftime("%Y-%m-%d %H:%M"),
-        "activity_log": log[-10:],
-    }).eq("email", user.email).execute()
+
+    users_collection.update_one(
+        {"email": user.email},
+        {"$set": {
+            "last_login": now.strftime("%Y-%m-%d %H:%M"),
+            "activity_log": log[-10:],
+        }}
+    )
+
     expire = now + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     token = jwt.encode({"sub": stored_user["email"], "exp": expire}, SECRET_KEY, algorithm=ALGORITHM)
     return {"access_token": token, "token_type": "bearer", "user": {"id": stored_user["id"], "email": stored_user["email"]}}
+
 
 @router.post("/forgot-password")
 async def forgot_password(req: ForgotRequest):
@@ -104,6 +126,7 @@ async def forgot_password(req: ForgotRequest):
         print(f"\n==== OTP for {req.email}: {otp} ====\n")
     return {"message": "OTP sent! Check your email."}
 
+
 @router.post("/reset-password")
 async def reset_password(req: VerifyOTP):
     stored = OTP_STORE.get(req.email)
@@ -113,18 +136,22 @@ async def reset_password(req: VerifyOTP):
         raise HTTPException(status_code=400, detail="OTP has expired")
     if stored["otp"] != req.otp:
         raise HTTPException(status_code=400, detail="Invalid OTP")
-    supabase.table("users").update({
-        "hashed_password": pwd_context.hash(req.new_password[:72]),
-    }).eq("email", req.email).execute()
+
+    users_collection.update_one(
+        {"email": req.email},
+        {"$set": {"hashed_password": pwd_context.hash(req.new_password[:72])}}
+    )
     del OTP_STORE[req.email]
     return {"message": "Password reset successful"}
 
+
+# ─── Admin Routes ─────────────────────────────────────────────────────────────
+
 @router.get("/admin/users")
 async def get_all_users():
-    res = supabase.table("users").select("*").order("id").execute()
-    users = []
-    for u in res.data:
-        users.append({
+    users = list(users_collection.find({}, {"_id": 0}).sort("id", 1))
+    return [
+        {
             "id": u["id"],
             "email": u["email"],
             "name": u.get("name", ""),
@@ -136,25 +163,30 @@ async def get_all_users():
             "workouts": u.get("workouts", 0),
             "lastMood": u.get("last_mood", "neutral"),
             "activity_log": u.get("activity_log", []),
-        })
-    return users
+        }
+        for u in users
+    ]
+
 
 @router.get("/admin/stats")
 async def get_stats():
-    res = supabase.table("users").select("*").execute()
-    users = res.data
+    users = list(users_collection.find({}, {"_id": 0}))
     total_users = len(users)
     total_workouts = sum(u.get("workouts", 0) for u in users)
     avg_workouts = round(total_workouts / total_users, 1) if total_users > 0 else 0
-    mood_counts = {}
+
+    mood_counts: dict = {}
     for u in users:
         mood = u.get("last_mood", "neutral")
         mood_counts[mood] = mood_counts.get(mood, 0) + 1
+
     top_mood = max(mood_counts, key=mood_counts.get) if mood_counts else "neutral"
-    reg_by_date = {}
+
+    reg_by_date: dict = {}
     for u in users:
         date = u.get("created_at", u.get("joined", "unknown"))
         reg_by_date[date] = reg_by_date.get(date, 0) + 1
+
     return {
         "total_users": total_users,
         "total_workouts": total_workouts,
@@ -164,12 +196,14 @@ async def get_stats():
         "registrations_by_date": reg_by_date,
     }
 
+
 @router.delete("/admin/users/{email}")
 async def delete_user(email: str):
     if not get_user(email):
         raise HTTPException(status_code=404, detail="User not found")
-    supabase.table("users").delete().eq("email", email).execute()
+    users_collection.delete_one({"email": email})
     return {"message": f"User {email} deleted successfully"}
+
 
 @router.put("/admin/users/{email}")
 async def update_user(email: str, updates: dict):
@@ -178,8 +212,9 @@ async def update_user(email: str, updates: dict):
     safe = {k: v for k, v in updates.items() if k not in ("hashed_password", "id")}
     if "lastMood" in safe:
         safe["last_mood"] = safe.pop("lastMood")
-    supabase.table("users").update(safe).eq("email", email).execute()
+    users_collection.update_one({"email": email}, {"$set": safe})
     return {"message": "User updated"}
+
 
 @router.post("/admin/users")
 async def create_user(user: RegisterUser):
@@ -199,8 +234,10 @@ async def create_user(user: RegisterUser):
         "last_login": "Never",
         "activity_log": [{"action": "Created by admin", "time": datetime.utcnow().isoformat()}],
     }
-    supabase.table("users").insert(new_user).execute()
+    users_collection.insert_one({**new_user})
+    new_user.pop("hashed_password", None)   # don't return password hash
     return {"message": "User created", "user": new_user}
+
 
 @router.post("/admin/email")
 async def send_email_to_user(payload: dict):
