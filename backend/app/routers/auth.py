@@ -1,7 +1,7 @@
 """
 app/routers/auth.py
 -------------------
-Authentication router — fully migrated from Supabase to MongoDB.
+Authentication router — MongoDB + improved OTP email sending.
 """
 
 from fastapi import APIRouter, HTTPException, status
@@ -10,6 +10,7 @@ from jose import jwt
 from datetime import datetime, timedelta
 import os, random, smtplib, json
 from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from app.models.user import UserCreate, RegisterUser, Token, UserResponse, ForgotRequest, VerifyOTP
 from app.database import users_collection
 
@@ -21,24 +22,69 @@ SECRET_KEY = "fitmood-secret-key-2026"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
-EMAIL_SENDER = os.environ.get("EMAIL_SENDER", "rakshithad1457@gmail.com")
+EMAIL_SENDER = os.environ.get("EMAIL_SENDER", "")
 EMAIL_PASSWORD = os.environ.get("EMAIL_PASSWORD", "")
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
-def send_otp_email(to_email, otp):
+def send_otp_email(to_email: str, otp: str) -> bool:
     try:
-        msg = MIMEText(f"Your FitMood OTP is: {otp}\n\nValid for 10 minutes.")
-        msg["Subject"] = "FitMood Password Reset OTP"
-        msg["From"] = EMAIL_SENDER
+        print(f"[EMAIL] Attempting to send OTP to {to_email}")
+        print(f"[EMAIL] Using sender: {EMAIL_SENDER}")
+        print(f"[EMAIL] Password set: {'YES' if EMAIL_PASSWORD else 'NO'}")
+
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = "FitMood — Your Password Reset OTP"
+        msg["From"] = f"FitMood <{EMAIL_SENDER}>"
         msg["To"] = to_email
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+
+        # Plain text version
+        text_body = f"""
+Hi there!
+
+Your FitMood OTP code is: {otp}
+
+This code is valid for 10 minutes.
+Do not share this code with anyone.
+
+— FitMood Team
+"""
+
+        # HTML version (nicer looking email)
+        html_body = f"""
+<html>
+<body style="font-family: Arial, sans-serif; background: #f4f4f4; padding: 30px;">
+  <div style="max-width: 400px; margin: auto; background: white; border-radius: 12px; padding: 30px; text-align: center;">
+    <h2 style="color: #FF6B35;">FitMood</h2>
+    <p style="color: #555;">Your password reset OTP code is:</p>
+    <div style="font-size: 36px; font-weight: bold; color: #FF6B35; letter-spacing: 8px; margin: 20px 0;">
+      {otp}
+    </div>
+    <p style="color: #999; font-size: 13px;">Valid for 10 minutes. Do not share this code.</p>
+  </div>
+</body>
+</html>
+"""
+
+        msg.attach(MIMEText(text_body, "plain"))
+        msg.attach(MIMEText(html_body, "html"))
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=10) as server:
             server.login(EMAIL_SENDER, EMAIL_PASSWORD)
             server.send_message(msg)
+
+        print(f"[EMAIL] OTP sent successfully to {to_email}")
         return True
+
+    except smtplib.SMTPAuthenticationError:
+        print(f"[EMAIL ERROR] Authentication failed — check EMAIL_SENDER and EMAIL_PASSWORD env vars")
+        return False
+    except smtplib.SMTPException as e:
+        print(f"[EMAIL ERROR] SMTP error: {e}")
+        return False
     except Exception as e:
-        print(f"Email error: {e}")
+        print(f"[EMAIL ERROR] Unexpected error: {e}")
         return False
 
 
@@ -52,12 +98,10 @@ def calc_age(dob_str):
 
 
 def get_user(email: str):
-    """Fetch a user document by email. Returns dict or None."""
     return users_collection.find_one({"email": email}, {"_id": 0})
 
 
 def get_next_id():
-    """Auto-increment integer ID (mirrors old Supabase behaviour)."""
     last = users_collection.find_one(sort=[("id", -1)], projection={"_id": 0, "id": 1})
     return (last["id"] + 1) if last else 1
 
@@ -83,7 +127,7 @@ async def register(user: RegisterUser):
         "last_login": now,
         "activity_log": [{"action": "Registered", "time": datetime.utcnow().isoformat()}],
     }
-    users_collection.insert_one({**new_user})   # _id added by Mongo, not returned to client
+    users_collection.insert_one({**new_user})
 
     expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     token = jwt.encode({"sub": user.email, "exp": expire}, SECRET_KEY, algorithm=ALGORITHM)
@@ -119,12 +163,20 @@ async def login(user: UserCreate):
 async def forgot_password(req: ForgotRequest):
     if not get_user(req.email):
         raise HTTPException(status_code=404, detail="Email not found")
+
     otp = str(random.randint(100000, 999999))
-    OTP_STORE[req.email] = {"otp": otp, "expires": (datetime.utcnow() + timedelta(minutes=10)).isoformat()}
+    OTP_STORE[req.email] = {
+        "otp": otp,
+        "expires": (datetime.utcnow() + timedelta(minutes=10)).isoformat()
+    }
+
     sent = send_otp_email(req.email, otp)
-    if not sent:
-        print(f"\n==== OTP for {req.email}: {otp} ====\n")
-    return {"message": "OTP sent! Check your email."}
+
+    if sent:
+        return {"message": "OTP sent! Check your email."}
+    else:
+        print(f"\n==== FALLBACK OTP for {req.email}: {otp} ====\n")
+        return {"message": "OTP sent! Check your email or backend terminal."}
 
 
 @router.post("/reset-password")
@@ -235,7 +287,7 @@ async def create_user(user: RegisterUser):
         "activity_log": [{"action": "Created by admin", "time": datetime.utcnow().isoformat()}],
     }
     users_collection.insert_one({**new_user})
-    new_user.pop("hashed_password", None)   # don't return password hash
+    new_user.pop("hashed_password", None)
     return {"message": "User created", "user": new_user}
 
 
@@ -247,11 +299,12 @@ async def send_email_to_user(payload: dict):
     if not to_email or not body:
         raise HTTPException(status_code=400, detail="Email and body are required")
     try:
-        msg = MIMEText(body)
+        msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
-        msg["From"] = EMAIL_SENDER
+        msg["From"] = f"FitMood <{EMAIL_SENDER}>"
         msg["To"] = to_email
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        msg.attach(MIMEText(body, "plain"))
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=10) as server:
             server.login(EMAIL_SENDER, EMAIL_PASSWORD)
             server.send_message(msg)
         return {"message": "Email sent successfully"}
