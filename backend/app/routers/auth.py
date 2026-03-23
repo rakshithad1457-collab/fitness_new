@@ -2,12 +2,14 @@
 app/routers/auth.py
 -------------------
 Authentication router — MongoDB + Brevo HTTP API for OTP email.
+Now includes /me endpoint for streak, and richer /admin/stats for graphs.
 """
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Header
 from passlib.context import CryptContext
-from jose import jwt
+from jose import jwt, JWTError
 from datetime import datetime, timedelta
+from typing import Optional
 import os, random, json, requests
 from app.models.user import UserCreate, RegisterUser, Token, UserResponse, ForgotRequest, VerifyOTP
 from app.database import users_collection
@@ -109,6 +111,9 @@ async def register(user: RegisterUser):
         "email": user.email,
         "hashed_password": pwd_context.hash(user.password[:72]),
         "workouts": 0,
+        "streak": 0,
+        "last_workout_date": None,
+        "workout_log": [],
         "last_mood": "neutral",
         "joined": now,
         "created_at": now,
@@ -145,6 +150,38 @@ async def login(user: UserCreate):
     expire = now + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     token = jwt.encode({"sub": stored_user["email"], "exp": expire}, SECRET_KEY, algorithm=ALGORITHM)
     return {"access_token": token, "token_type": "bearer", "user": {"id": stored_user["id"], "email": stored_user["email"]}}
+
+
+# ─── Me Route (for dashboard streak) ─────────────────────────────────────────
+
+@router.get("/me")
+async def get_me(authorization: Optional[str] = Header(None)):
+    """Returns the logged-in user's profile including streak and workouts."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    try:
+        token = authorization.split(" ")[1]
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        email = payload.get("sub")
+        if not email:
+            raise HTTPException(status_code=401, detail="Invalid token")
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    user = get_user(email)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    return {
+        "id": user["id"],
+        "email": user["email"],
+        "name": user.get("name", ""),
+        "workouts": user.get("workouts", 0),
+        "streak": user.get("streak", 0),
+        "last_mood": user.get("last_mood", "neutral"),
+        "last_workout_date": user.get("last_workout_date", None),
+        "joined": user.get("joined", ""),
+    }
 
 
 @router.post("/forgot-password")
@@ -201,6 +238,7 @@ async def get_all_users():
             "created_at": u.get("created_at", "N/A"),
             "last_login": u.get("last_login", "N/A"),
             "workouts": u.get("workouts", 0),
+            "streak": u.get("streak", 0),
             "lastMood": u.get("last_mood", "neutral"),
             "activity_log": u.get("activity_log", []),
         }
@@ -215,6 +253,7 @@ async def get_stats():
     total_workouts = sum(u.get("workouts", 0) for u in users)
     avg_workouts = round(total_workouts / total_users, 1) if total_users > 0 else 0
 
+    # Mood distribution
     mood_counts: dict = {}
     for u in users:
         mood = u.get("last_mood", "neutral")
@@ -222,10 +261,40 @@ async def get_stats():
 
     top_mood = max(mood_counts, key=mood_counts.get) if mood_counts else "neutral"
 
+    # Registrations by date
     reg_by_date: dict = {}
     for u in users:
         date = u.get("created_at", u.get("joined", "unknown"))
         reg_by_date[date] = reg_by_date.get(date, 0) + 1
+
+    # Workout activity over time — aggregate all workout_log entries across all users
+    workout_trend: dict = {}
+    for u in users:
+        for entry in u.get("workout_log", []):
+            date = entry.get("date", "")
+            if date:
+                workout_trend[date] = workout_trend.get(date, 0) + 1
+
+    # Age group distribution — derived from dob
+    age_groups = {"13-17": 0, "18-35": 0, "36-55": 0, "56+": 0}
+    for u in users:
+        age = calc_age(u.get("dob", ""))
+        if age is not None:
+            if age <= 17:
+                age_groups["13-17"] += 1
+            elif age <= 35:
+                age_groups["18-35"] += 1
+            elif age <= 55:
+                age_groups["36-55"] += 1
+            else:
+                age_groups["56+"] += 1
+
+    # Streak leaderboard — top 10 users by streak
+    streak_leaders = sorted(
+        [{"name": u.get("name", u["email"].split("@")[0]), "streak": u.get("streak", 0)} for u in users],
+        key=lambda x: x["streak"],
+        reverse=True
+    )[:10]
 
     return {
         "total_users": total_users,
@@ -234,6 +303,9 @@ async def get_stats():
         "top_mood": top_mood,
         "mood_counts": mood_counts,
         "registrations_by_date": reg_by_date,
+        "workout_trend": workout_trend,
+        "age_groups": age_groups,
+        "streak_leaders": streak_leaders,
     }
 
 
@@ -268,6 +340,9 @@ async def create_user(user: RegisterUser):
         "email": user.email,
         "hashed_password": pwd_context.hash(user.password[:72]),
         "workouts": 0,
+        "streak": 0,
+        "last_workout_date": None,
+        "workout_log": [],
         "last_mood": "neutral",
         "joined": now,
         "created_at": now,

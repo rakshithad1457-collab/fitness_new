@@ -2,12 +2,14 @@
 app/routers/workouts.py
 -----------------------
 Workouts router — fully migrated from Supabase to MongoDB.
+Now includes streak tracking.
 """
 
 from fastapi import APIRouter, HTTPException, Header
 from pydantic import BaseModel, Field
 from typing import Optional
 from jose import jwt, JWTError
+from datetime import datetime, timedelta
 from app.database import users_collection
 from app.services.workout_service import get_mood_workout
 
@@ -56,22 +58,55 @@ async def generate_workout(request: WorkoutRequest, authorization: Optional[str]
     if age_category not in VALID_AGE_CATEGORIES:
         raise HTTPException(status_code=400, detail=f"Age category '{age_category}' not supported.")
 
-    # Update user's mood and workout count in MongoDB
+    # Update user's mood, workout count, streak, and workout_log in MongoDB
     if authorization and authorization.startswith("Bearer "):
         try:
             token = authorization.split(" ")[1]
             payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
             email = payload.get("sub")
             if email:
-                user = users_collection.find_one({"email": email}, {"_id": 0, "workouts": 1})
+                user = users_collection.find_one(
+                    {"email": email},
+                    {"_id": 0, "workouts": 1, "streak": 1, "last_workout_date": 1}
+                )
                 if user:
                     current_workouts = user.get("workouts", 0) or 0
+                    current_streak = user.get("streak", 0) or 0
+                    last_workout_date = user.get("last_workout_date", None)
+                    today = datetime.utcnow().date().isoformat()
+                    yesterday = (datetime.utcnow().date() - timedelta(days=1)).isoformat()
+
+                    # Streak logic
+                    if last_workout_date == today:
+                        # Already worked out today — don't increment streak or workouts again
+                        new_streak = current_streak
+                        new_workouts = current_workouts
+                    elif last_workout_date == yesterday:
+                        # Consecutive day — extend streak
+                        new_streak = current_streak + 1
+                        new_workouts = current_workouts + 1
+                    else:
+                        # Streak broken or first workout ever
+                        new_streak = 1
+                        new_workouts = current_workouts + 1
+
                     users_collection.update_one(
                         {"email": email},
-                        {"$set": {
-                            "last_mood": mood,
-                            "workouts": current_workouts + 1,
-                        }}
+                        {
+                            "$set": {
+                                "last_mood": mood,
+                                "workouts": new_workouts,
+                                "streak": new_streak,
+                                "last_workout_date": today,
+                            },
+                            # Keep a log of every workout with date + mood for admin graphs
+                            "$push": {
+                                "workout_log": {
+                                    "$each": [{"date": today, "mood": mood}],
+                                    "$slice": -200  # keep last 200 entries max
+                                }
+                            }
+                        }
                     )
         except JWTError:
             pass  # Invalid token — skip update silently

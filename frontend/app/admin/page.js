@@ -7,11 +7,11 @@ import {
   Users, Dumbbell, TrendingUp, LogOut, ShieldCheck,
   RefreshCw, Activity, Trash2, Pencil, Plus, X, Check,
   Search, ChevronUp, ChevronDown, Download, Mail, Clock,
-  BarChart2, List,
+  BarChart2, List, Flame,
 } from 'lucide-react';
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis,
-  Tooltip, ResponsiveContainer, PieChart, Pie, Cell,
+  Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line,
 } from 'recharts';
 
 const MOOD_COLORS = {
@@ -19,6 +19,8 @@ const MOOD_COLORS = {
   tired: '#8B5CF6', motivated: '#EAB308', sad: '#EF4444',
   anxious: '#EC4899', neutral: '#6B7280',
 };
+
+const AGE_COLORS = ['#F97316', '#3B82F6', '#22C55E', '#8B5CF6'];
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
 const INP = "w-full bg-[#0D1117] border border-[#30363D] rounded-lg px-3 py-2 text-sm text-white placeholder-[#484F58] outline-none focus:border-[#F97316] focus:ring-1 focus:ring-[#F97316]/30 transition-all";
@@ -128,28 +130,60 @@ export default function AdminPage() {
   };
 
   const exportCSV = () => {
-    const rows = [['ID', 'Name', 'Email', 'Age', 'DOB', 'Joined', 'Last Login', 'Workouts', 'Mood']];
-    users.forEach(u => rows.push([u.id, u.name, u.email, u.age ?? 'N/A', u.dob, u.joined, u.last_login, u.workouts, u.lastMood]));
+    const rows = [['ID', 'Name', 'Email', 'Age', 'DOB', 'Joined', 'Last Login', 'Workouts', 'Streak', 'Mood']];
+    users.forEach(u => rows.push([u.id, u.name, u.email, u.age ?? 'N/A', u.dob, u.joined, u.last_login, u.workouts, u.streak ?? 0, u.lastMood]));
     const csv = rows.map(r => r.join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
     a.download = 'fitmood_users.csv'; a.click();
   };
 
-  // Chart data
-  const moodChartData = stats ? Object.entries(stats.mood_counts || {}).map(([mood, count]) => ({ mood, count, fill: MOOD_COLORS[mood] || '#6B7280' })) : [];
-  const regChartData = stats ? Object.entries(stats.registrations_by_date || {}).sort((a, b) => a[0].localeCompare(b[0])).map(([date, count]) => ({ date, count })) : [];
+  // ── Chart data ──────────────────────────────────────────────────────────────
 
+  // Mood distribution (existing)
+  const moodChartData = stats
+    ? Object.entries(stats.mood_counts || {}).map(([mood, count]) => ({ mood, count, fill: MOOD_COLORS[mood] || '#6B7280' }))
+    : [];
+
+  // Registration growth (existing)
+  const regChartData = stats
+    ? Object.entries(stats.registrations_by_date || {})
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([date, count]) => ({ date, count }))
+    : [];
+
+  // Workout activity over time (NEW) — from workout_log aggregated on backend
+  const workoutTrendData = stats
+    ? Object.entries(stats.workout_trend || {})
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([date, count]) => ({ date, count }))
+    : [];
+
+  // Age group distribution (NEW)
+  const ageGroupData = stats
+    ? Object.entries(stats.age_groups || {}).map(([group, count], i) => ({
+        group,
+        count,
+        fill: AGE_COLORS[i] || '#6B7280',
+      }))
+    : [];
+
+  // Streak leaderboard (NEW)
+  const streakLeaderData = stats ? (stats.streak_leaders || []) : [];
+
+  // ── Summary numbers ─────────────────────────────────────────────────────────
   const totalUsers = users.length;
   const totalWorkouts = users.reduce((s, u) => s + (u.workouts || 0), 0);
   const avgWorkouts = totalUsers ? (totalWorkouts / totalUsers).toFixed(1) : 0;
   const topMood = stats?.top_mood || '—';
+  const topStreak = users.length > 0 ? Math.max(...users.map(u => u.streak || 0)) : 0;
 
   const STATS = [
-    { label: 'Total Users', value: totalUsers, icon: Users, color: '#F97316', bg: '#F9731610' },
-    { label: 'Total Workouts', value: totalWorkouts, icon: Dumbbell, color: '#22C55E', bg: '#22C55E10' },
-    { label: 'Avg per User', value: avgWorkouts, icon: TrendingUp, color: '#3B82F6', bg: '#3B82F610' },
-    { label: 'Top Mood', value: topMood, icon: Activity, color: '#8B5CF6', bg: '#8B5CF610' },
+    { label: 'Total Users',    value: totalUsers,    icon: Users,     color: '#F97316', bg: '#F9731610' },
+    { label: 'Total Workouts', value: totalWorkouts, icon: Dumbbell,  color: '#22C55E', bg: '#22C55E10' },
+    { label: 'Avg per User',   value: avgWorkouts,   icon: TrendingUp,color: '#3B82F6', bg: '#3B82F610' },
+    { label: 'Top Mood',       value: topMood,       icon: Activity,  color: '#8B5CF6', bg: '#8B5CF610' },
+    { label: 'Best Streak',    value: `${topStreak}d`, icon: Flame,   color: '#F97316', bg: '#F9731610' },
   ];
 
   const SortIcon = ({ col }) => sortKey === col
@@ -157,9 +191,11 @@ export default function AdminPage() {
     : <ChevronUp size={12} className="text-[#484F58]" />;
 
   const TABS = [
-    { id: 'users', label: 'Users', icon: List },
+    { id: 'users',     label: 'Users',     icon: List },
     { id: 'analytics', label: 'Analytics', icon: BarChart2 },
   ];
+
+  const tooltipStyle = { background: '#161B22', border: '1px solid #30363D', borderRadius: 8, fontSize: 12 };
 
   return (
     <div className="min-h-screen bg-[#0D1117] text-white font-sans">
@@ -206,8 +242,8 @@ export default function AdminPage() {
       <main className="max-w-7xl mx-auto px-6 py-8 space-y-6">
         {error && <div className="p-4 rounded-xl bg-red-500/5 border border-red-500/20 text-red-400 text-sm text-center">⚠️ {error}</div>}
 
-        {/* Stats */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Stats Row — now 5 cards (added Best Streak) */}
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
           {STATS.map((s, i) => {
             const Icon = s.icon;
             return (
@@ -238,7 +274,7 @@ export default function AdminPage() {
           })}
         </div>
 
-        {/* USERS TAB */}
+        {/* ── USERS TAB ──────────────────────────────────────────────────────── */}
         {activeTab === 'users' && (
           <div className="bg-[#161B22] border border-[#30363D] rounded-xl overflow-hidden">
             <div className="px-5 py-4 border-b border-[#30363D] flex items-center justify-between gap-4">
@@ -263,10 +299,15 @@ export default function AdminPage() {
                   <thead>
                     <tr className="border-b border-[#30363D]">
                       {[
-                        { label: '#', key: 'id' }, { label: 'User', key: 'name' },
-                        { label: 'Email', key: 'email' }, { label: 'Age', key: 'age' },
-                        { label: 'Last Login', key: 'last_login' }, { label: 'Mood', key: 'lastMood' },
-                        { label: 'Workouts', key: 'workouts' }, { label: 'Actions', key: null },
+                        { label: '#',          key: 'id' },
+                        { label: 'User',       key: 'name' },
+                        { label: 'Email',      key: 'email' },
+                        { label: 'Age',        key: 'age' },
+                        { label: 'Last Login', key: 'last_login' },
+                        { label: 'Mood',       key: 'lastMood' },
+                        { label: 'Workouts',   key: 'workouts' },
+                        { label: 'Streak 🔥',  key: 'streak' },
+                        { label: 'Actions',    key: null },
                       ].map(col => (
                         <th key={col.label} onClick={() => col.key && handleSort(col.key)}
                           className={`text-left px-5 py-3 text-xs font-semibold text-[#8B949E] uppercase tracking-wider whitespace-nowrap ${col.key ? 'cursor-pointer hover:text-white select-none' : ''}`}>
@@ -319,6 +360,17 @@ export default function AdminPage() {
                           }
                         </td>
                         <td className="px-5 py-3.5 text-[#8B949E] text-xs">{user.workouts ?? 0}</td>
+
+                        {/* ── Streak cell (NEW) ── */}
+                        <td className="px-5 py-3.5">
+                          <div className="flex items-center gap-1">
+                            {(user.streak ?? 0) > 0 && <Flame size={12} className="text-[#F97316]" />}
+                            <span className={`text-xs font-semibold ${(user.streak ?? 0) > 0 ? 'text-[#F97316]' : 'text-[#484F58]'}`}>
+                              {user.streak ?? 0}d
+                            </span>
+                          </div>
+                        </td>
+
                         <td className="px-5 py-3.5">
                           <div className="flex items-center gap-1.5">
                             {editingUser === user.email ? (
@@ -371,12 +423,12 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* ANALYTICS TAB */}
+        {/* ── ANALYTICS TAB ──────────────────────────────────────────────────── */}
         {activeTab === 'analytics' && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
-              {/* Registration Growth */}
+              {/* 1. Registration Growth (existing) */}
               <div className="bg-[#161B22] border border-[#30363D] rounded-xl p-5">
                 <h3 className="text-sm font-semibold text-white mb-1">Registration Growth</h3>
                 <p className="text-xs text-[#484F58] mb-5">New users over time</p>
@@ -386,20 +438,20 @@ export default function AdminPage() {
                       <AreaChart data={regChartData}>
                         <defs>
                           <linearGradient id="regGrad" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#F97316" stopOpacity={0.3} />
+                            <stop offset="5%"  stopColor="#F97316" stopOpacity={0.3} />
                             <stop offset="95%" stopColor="#F97316" stopOpacity={0} />
                           </linearGradient>
                         </defs>
                         <XAxis dataKey="date" tick={{ fill: '#484F58', fontSize: 10 }} axisLine={false} tickLine={false} />
                         <YAxis tick={{ fill: '#484F58', fontSize: 10 }} axisLine={false} tickLine={false} allowDecimals={false} />
-                        <Tooltip contentStyle={{ background: '#161B22', border: '1px solid #30363D', borderRadius: 8, fontSize: 12 }} />
+                        <Tooltip contentStyle={tooltipStyle} />
                         <Area type="monotone" dataKey="count" stroke="#F97316" fill="url(#regGrad)" strokeWidth={2} />
                       </AreaChart>
                     </ResponsiveContainer>
                 }
               </div>
 
-              {/* Mood Distribution */}
+              {/* 2. Mood Distribution (existing) */}
               <div className="bg-[#161B22] border border-[#30363D] rounded-xl p-5">
                 <h3 className="text-sm font-semibold text-white mb-1">Mood Distribution</h3>
                 <p className="text-xs text-[#484F58] mb-5">Current mood across all users</p>
@@ -411,7 +463,7 @@ export default function AdminPage() {
                           <Pie data={moodChartData} dataKey="count" nameKey="mood" cx="50%" cy="50%" outerRadius={70} innerRadius={40} paddingAngle={3}>
                             {moodChartData.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
                           </Pie>
-                          <Tooltip contentStyle={{ background: '#161B22', border: '1px solid #30363D', borderRadius: 8, fontSize: 12 }} />
+                          <Tooltip contentStyle={tooltipStyle} />
                         </PieChart>
                       </ResponsiveContainer>
                       <div className="flex flex-col gap-2">
@@ -427,8 +479,59 @@ export default function AdminPage() {
                 }
               </div>
 
-              {/* Workouts per User */}
-              <div className="bg-[#161B22] border border-[#30363D] rounded-xl p-5 lg:col-span-2">
+              {/* 3. Workout Activity Over Time (NEW) */}
+              <div className="bg-[#161B22] border border-[#30363D] rounded-xl p-5">
+                <h3 className="text-sm font-semibold text-white mb-1">Workout Activity</h3>
+                <p className="text-xs text-[#484F58] mb-5">Total workouts logged per day across all users</p>
+                {workoutTrendData.length === 0
+                  ? <div className="h-48 flex items-center justify-center text-[#484F58] text-xs">No workout data yet — workouts will appear here after users complete sessions</div>
+                  : <ResponsiveContainer width="100%" height={200}>
+                      <LineChart data={workoutTrendData}>
+                        <defs>
+                          <linearGradient id="wGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%"  stopColor="#22C55E" stopOpacity={0.3} />
+                            <stop offset="95%" stopColor="#22C55E" stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <XAxis dataKey="date" tick={{ fill: '#484F58', fontSize: 10 }} axisLine={false} tickLine={false} />
+                        <YAxis tick={{ fill: '#484F58', fontSize: 10 }} axisLine={false} tickLine={false} allowDecimals={false} />
+                        <Tooltip contentStyle={tooltipStyle} />
+                        <Line type="monotone" dataKey="count" stroke="#22C55E" strokeWidth={2} dot={{ fill: '#22C55E', r: 3 }} activeDot={{ r: 5 }} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                }
+              </div>
+
+              {/* 4. Age Group Distribution (NEW) */}
+              <div className="bg-[#161B22] border border-[#30363D] rounded-xl p-5">
+                <h3 className="text-sm font-semibold text-white mb-1">Age Distribution</h3>
+                <p className="text-xs text-[#484F58] mb-5">Users grouped by age range</p>
+                {ageGroupData.every(g => g.count === 0)
+                  ? <div className="h-48 flex items-center justify-center text-[#484F58] text-xs">No age data yet</div>
+                  : <div className="flex items-center gap-6">
+                      <ResponsiveContainer width="50%" height={180}>
+                        <PieChart>
+                          <Pie data={ageGroupData} dataKey="count" nameKey="group" cx="50%" cy="50%" outerRadius={70} innerRadius={40} paddingAngle={3}>
+                            {ageGroupData.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
+                          </Pie>
+                          <Tooltip contentStyle={tooltipStyle} />
+                        </PieChart>
+                      </ResponsiveContainer>
+                      <div className="flex flex-col gap-2">
+                        {ageGroupData.map((g, i) => (
+                          <div key={i} className="flex items-center gap-2">
+                            <div className="w-2.5 h-2.5 rounded-full" style={{ background: g.fill }} />
+                            <span className="text-xs text-[#8B949E]">{g.group}</span>
+                            <span className="text-xs text-white font-semibold ml-auto pl-4">{g.count}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                }
+              </div>
+
+              {/* 5. Workouts per User (existing) */}
+              <div className="bg-[#161B22] border border-[#30363D] rounded-xl p-5">
                 <h3 className="text-sm font-semibold text-white mb-1">Workouts per User</h3>
                 <p className="text-xs text-[#484F58] mb-5">Individual workout counts</p>
                 {users.length === 0
@@ -437,18 +540,36 @@ export default function AdminPage() {
                       <BarChart data={users.map(u => ({ name: u.name || u.email.split('@')[0], workouts: u.workouts || 0 }))}>
                         <XAxis dataKey="name" tick={{ fill: '#484F58', fontSize: 10 }} axisLine={false} tickLine={false} />
                         <YAxis tick={{ fill: '#484F58', fontSize: 10 }} axisLine={false} tickLine={false} allowDecimals={false} />
-                        <Tooltip contentStyle={{ background: '#161B22', border: '1px solid #30363D', borderRadius: 8, fontSize: 12 }} />
+                        <Tooltip contentStyle={tooltipStyle} />
                         <Bar dataKey="workouts" fill="#F97316" radius={[4, 4, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
                 }
               </div>
+
+              {/* 6. Streak Leaderboard (NEW) */}
+              <div className="bg-[#161B22] border border-[#30363D] rounded-xl p-5">
+                <h3 className="text-sm font-semibold text-white mb-1">Streak Leaderboard 🔥</h3>
+                <p className="text-xs text-[#484F58] mb-5">Top 10 users by current streak</p>
+                {streakLeaderData.length === 0 || streakLeaderData.every(u => u.streak === 0)
+                  ? <div className="h-48 flex items-center justify-center text-[#484F58] text-xs">No streaks yet — users need to complete workouts on consecutive days</div>
+                  : <ResponsiveContainer width="100%" height={200}>
+                      <BarChart data={streakLeaderData} layout="vertical">
+                        <XAxis type="number" tick={{ fill: '#484F58', fontSize: 10 }} axisLine={false} tickLine={false} allowDecimals={false} />
+                        <YAxis type="category" dataKey="name" tick={{ fill: '#8B949E', fontSize: 10 }} axisLine={false} tickLine={false} width={70} />
+                        <Tooltip contentStyle={tooltipStyle} formatter={(v) => [`${v} days`, 'Streak']} />
+                        <Bar dataKey="streak" fill="#F97316" radius={[0, 4, 4, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                }
+              </div>
+
             </div>
           </div>
         )}
       </main>
 
-      {/* Activity Log Modal */}
+      {/* ── Activity Log Modal ──────────────────────────────────────────────── */}
       <AnimatePresence>
         {activityModal && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -481,7 +602,7 @@ export default function AdminPage() {
         )}
       </AnimatePresence>
 
-      {/* Email Modal */}
+      {/* ── Email Modal ─────────────────────────────────────────────────────── */}
       <AnimatePresence>
         {emailModal && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -517,7 +638,7 @@ export default function AdminPage() {
         )}
       </AnimatePresence>
 
-      {/* Delete Confirm Modal */}
+      {/* ── Delete Confirm Modal ─────────────────────────────────────────────── */}
       <AnimatePresence>
         {deleteConfirm && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -538,7 +659,7 @@ export default function AdminPage() {
         )}
       </AnimatePresence>
 
-      {/* Create User Modal */}
+      {/* ── Create User Modal ────────────────────────────────────────────────── */}
       <AnimatePresence>
         {showCreate && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -554,10 +675,10 @@ export default function AdminPage() {
               </div>
               <div className="space-y-3">
                 {[
-                  { label: 'Full Name', key: 'name', type: 'text', placeholder: 'John Doe' },
-                  { label: 'Date of Birth', key: 'dob', type: 'date', placeholder: '' },
-                  { label: 'Email Address', key: 'email', type: 'email', placeholder: 'john@example.com' },
-                  { label: 'Password', key: 'password', type: 'password', placeholder: '••••••••' },
+                  { label: 'Full Name',      key: 'name',     type: 'text',     placeholder: 'John Doe' },
+                  { label: 'Date of Birth',  key: 'dob',      type: 'date',     placeholder: '' },
+                  { label: 'Email Address',  key: 'email',    type: 'email',    placeholder: 'john@example.com' },
+                  { label: 'Password',       key: 'password', type: 'password', placeholder: '••••••••' },
                 ].map(field => (
                   <div key={field.key}>
                     <label className="block text-xs font-medium text-[#8B949E] mb-1">{field.label}</label>
