@@ -126,6 +126,7 @@ async def register(user: RegisterUser):
     token = jwt.encode({"sub": user.email, "exp": expire}, SECRET_KEY, algorithm=ALGORITHM)
     return {"access_token": token, "token_type": "bearer", "user": {"id": new_user["id"], "email": new_user["email"], "name": new_user["name"]}}
 
+
 @router.post("/login", response_model=Token)
 async def login(user: UserCreate):
     stored_user = get_user(user.email)
@@ -148,7 +149,8 @@ async def login(user: UserCreate):
 
     expire = now + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     token = jwt.encode({"sub": stored_user["email"], "exp": expire}, SECRET_KEY, algorithm=ALGORITHM)
-   return {"access_token": token, "token_type": "bearer", "user": {"id": stored_user["id"], "email": stored_user["email"], "name": stored_user.get("name", "")}}
+    return {"access_token": token, "token_type": "bearer", "user": {"id": stored_user["id"], "email": stored_user["email"], "name": stored_user.get("name", "")}}
+
 
 # ─── Me Route (for dashboard streak) ─────────────────────────────────────────
 
