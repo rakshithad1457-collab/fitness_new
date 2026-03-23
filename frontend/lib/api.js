@@ -24,7 +24,15 @@ export const authAPI = {
     const response = await api.post('/api/auth/register', { name, dob, email, password });
     if (response.data.access_token) {
       localStorage.setItem('token', response.data.access_token);
-      localStorage.setItem('user', JSON.stringify(response.data.user));
+      // Fetch full user info (includes name) and save it
+      try {
+        const meRes = await api.get('/api/auth/me', {
+          headers: { Authorization: `Bearer ${response.data.access_token}` },
+        });
+        localStorage.setItem('user', JSON.stringify(meRes.data));
+      } catch {
+        localStorage.setItem('user', JSON.stringify(response.data.user));
+      }
     }
     return response.data;
   },
@@ -32,7 +40,15 @@ export const authAPI = {
     const response = await api.post('/api/auth/login', { email, password });
     if (response.data.access_token) {
       localStorage.setItem('token', response.data.access_token);
-      localStorage.setItem('user', JSON.stringify(response.data.user));
+      // Fetch full user info (includes name) and save it
+      try {
+        const meRes = await api.get('/api/auth/me', {
+          headers: { Authorization: `Bearer ${response.data.access_token}` },
+        });
+        localStorage.setItem('user', JSON.stringify(meRes.data));
+      } catch {
+        localStorage.setItem('user', JSON.stringify(response.data.user));
+      }
     }
     return response.data;
   },
