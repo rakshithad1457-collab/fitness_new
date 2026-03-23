@@ -15,7 +15,8 @@
     "lucide-react": "^1.0.1",
     "next": "^16.1.6",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "recharts": "^3.8.0"
   },
   "devDependencies": {
     "@types/node": "25.2.3",
