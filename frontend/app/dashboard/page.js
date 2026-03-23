@@ -55,7 +55,7 @@ export default function DashboardPage() {
     }
   }, [router]);
 
-  const userName = mounted ? (user?.email?.split('@')[0] || 'Member') : 'Member';
+  const userName = mounted ? (user?.full_name || user?.name || user?.email?.split('@')[0] || 'Member') : 'Member';
 
   if (loading)
     return (
